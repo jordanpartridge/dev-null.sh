@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Ai\Tools;
 
+use App\Ai\Tools\Concerns\HasToolCallBudget;
+use App\Ai\Tools\Concerns\ReleasesToolCallBudget;
 use App\Models\Commit;
 use App\Models\User;
 use App\Queries\CommitSearchQuery;
@@ -14,8 +16,10 @@ use Laravel\Ai\Contracts\Tool;
 use Laravel\Ai\Tools\Request;
 
 #[Concurrent]
-final readonly class SearchCommits implements Tool
+final readonly class SearchCommits implements ReleasesToolCallBudget, Tool
 {
+    use HasToolCallBudget;
+
     private ToolCallBudget $budget;
 
     public function __construct()

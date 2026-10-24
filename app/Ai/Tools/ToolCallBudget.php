@@ -4,40 +4,66 @@ declare(strict_types=1);
 
 namespace App\Ai\Tools;
 
+use App\Ai\Tools\Concerns\ReleasesToolCallBudget;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Str;
-use RuntimeException;
 
 /**
  * The two-call cap for one tool instance.
  *
  * A concurrent batch serializes the tool into each child, and the child does not write the parent's
- * properties back. An in-memory counter would stay where the parent left it, so a second wave of calls
- * could run past the cap. The count is a file the parent and those children lock.
+ * properties back. The count is a file-cache entry those children share, taken under the store's lock.
+ * Tests keep the array store as the default, and a cache row still inside the reply's transaction is
+ * invisible to a child, so the count uses the file store. The entry expires if a worker dies mid-reply,
+ * and the reply releases it when the request finishes.
  */
 final readonly class ToolCallBudget
 {
+    private const string Store = 'file';
+
     private const int Limit = 2;
 
-    private string $path;
+    private const int TtlSeconds = 900;
+
+    private const int LockSeconds = 10;
+
+    private string $key;
 
     public function __construct()
     {
-        $this->path = storage_path('framework/cache/data/tom-tool-'.Str::uuid()->toString());
+        $this->key = 'tom-tool-budget:'.Str::uuid()->toString();
+    }
+
+    /**
+     * @param  iterable<mixed>  $tools
+     */
+    public static function releaseAll(iterable $tools): void
+    {
+        foreach ($tools as $tool) {
+            if (! $tool instanceof ReleasesToolCallBudget) {
+                continue;
+            }
+
+            $tool->releaseToolCallBudget();
+        }
     }
 
     public function exceeded(): bool
     {
-        $handle = fopen($this->path, 'c+') ?: throw new RuntimeException('Unable to track the tool call budget.');
+        $cache = Cache::repository(Cache::store(self::Store)->getStore(), ['store' => self::Store]);
 
-        flock($handle, LOCK_EX);
-        $count = ((int) stream_get_contents($handle)) + 1;
-        rewind($handle);
-        ftruncate($handle, 0);
-        fwrite($handle, (string) $count);
-        fflush($handle);
-        flock($handle, LOCK_UN);
-        fclose($handle);
+        $count = $cache->withoutOverlapping($this->key, function () use ($cache): int {
+            $count = $cache->integer($this->key, 0) + 1;
+            $cache->put($this->key, $count, self::TtlSeconds);
+
+            return $count;
+        }, self::LockSeconds, self::LockSeconds);
 
         return $count > self::Limit;
+    }
+
+    public function release(): void
+    {
+        Cache::store(self::Store)->forget($this->key);
     }
 }

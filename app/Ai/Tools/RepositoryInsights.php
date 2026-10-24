@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Ai\Tools;
 
+use App\Ai\Tools\Concerns\HasToolCallBudget;
+use App\Ai\Tools\Concerns\ReleasesToolCallBudget;
 use App\Queries\RepositoryInsightsQuery;
 use Illuminate\Contracts\JsonSchema\JsonSchema;
 use Illuminate\JsonSchema\Types\Type;
@@ -12,8 +14,10 @@ use Laravel\Ai\Contracts\Tool;
 use Laravel\Ai\Tools\Request;
 
 #[Concurrent]
-final readonly class RepositoryInsights implements Tool
+final readonly class RepositoryInsights implements ReleasesToolCallBudget, Tool
 {
+    use HasToolCallBudget;
+
     private const array Metrics = ['contributors', 'recent_changes', 'opportunities', 'overview', 'languages'];
 
     private ToolCallBudget $budget;

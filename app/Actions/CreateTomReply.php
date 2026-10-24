@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Actions;
 
 use App\Ai\Agents\Tom;
+use App\Ai\Tools\ToolCallBudget;
 use App\Enums\CommitStatus;
 use App\Models\Commit;
 use App\Models\User;
@@ -39,38 +40,43 @@ final readonly class CreateTomReply
 
         $history = new Tom($commit)->messages();
         $tools = $this->toolDecision->decide($commit->body, $history);
-        $attempt = 0;
-        $messages = [];
-        $called = collect();
 
-        do {
-            $response = new Tom($commit, $tools, $messages)->prompt($commit->body);
-            $messages = [...$messages, new UserMessage($commit->body), ...$response->messages];
-            $called = $called->concat($response->toolResults->pluck('name'));
-            $missingTools = $tools->contains(fn (Tool $tool): bool => $called->doesntContain(class_basename($tool)));
-            $attempt++;
-        } while ($missingTools && $attempt < 3);
+        try {
+            $attempt = 0;
+            $messages = [];
+            $called = collect();
 
-        if ($missingTools) {
-            throw new RuntimeException('Tom skipped a selected tool after retries.');
-        }
+            do {
+                $response = new Tom($commit, $tools, $messages)->prompt($commit->body);
+                $messages = [...$messages, new UserMessage($commit->body), ...$response->messages];
+                $called = $called->concat($response->toolResults->pluck('name'));
+                $missingTools = $tools->contains(fn (Tool $tool): bool => $called->doesntContain(class_basename($tool)));
+                $attempt++;
+            } while ($missingTools && $attempt < 3);
 
-        $body = mb_trim($response->text);
-
-        if ($body === '') {
-            throw new RuntimeException('Tom returned an empty reply.');
-        }
-
-        DB::transaction(function () use ($commit, $tom, $body): void {
-            $current = Commit::query()->lockForUpdate()->find($commit->id);
-
-            if (! $current instanceof Commit || $current->status !== CommitStatus::Approved
-                || $current->body !== $commit->body || ! $this->replyable($current, $tom)) {
-                return;
+            if ($missingTools) {
+                throw new RuntimeException('Tom skipped a selected tool after retries.');
             }
 
-            $this->createCommit->handle($tom, Str::limit($body, Commit::MAX_BODY_LENGTH - 3), parent: $current, linkPreview: false);
-        });
+            $body = mb_trim($response->text);
+
+            if ($body === '') {
+                throw new RuntimeException('Tom returned an empty reply.');
+            }
+
+            DB::transaction(function () use ($commit, $tom, $body): void {
+                $current = Commit::query()->lockForUpdate()->find($commit->id);
+
+                if (! $current instanceof Commit || $current->status !== CommitStatus::Approved
+                    || $current->body !== $commit->body || ! $this->replyable($current, $tom)) {
+                    return;
+                }
+
+                $this->createCommit->handle($tom, Str::limit($body, Commit::MAX_BODY_LENGTH - 3), parent: $current, linkPreview: false);
+            });
+        } finally {
+            ToolCallBudget::releaseAll($tools);
+        }
     }
 
     /**

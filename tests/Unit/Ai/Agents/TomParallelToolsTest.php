@@ -91,41 +91,51 @@ it('runs concurrent calls from one step together and hands results back in call 
 });
 
 it('runs community statistics from one step in child processes and keeps call order', function (): void {
-    [, $gateway] = promptTom([new CommunityStats], [
-        TomParallelScript::calls([
-            ['call-members', 'CommunityStats', ['metric' => 'members']],
-            ['call-signups', 'CommunityStats', ['metric' => 'new_members', 'days' => 7]],
-        ]),
-        TomParallelScript::text('Counted.'),
-    ]);
+    $stats = new CommunityStats;
 
-    $results = delivered($gateway);
+    try {
+        [, $gateway] = promptTom([$stats], [
+            TomParallelScript::calls([
+                ['call-members', 'CommunityStats', ['metric' => 'members']],
+                ['call-signups', 'CommunityStats', ['metric' => 'new_members', 'days' => 7]],
+            ]),
+            TomParallelScript::text('Counted.'),
+        ]);
 
-    expect($results->pluck('id')->all())->toBe(['call-members', 'call-signups'])
-        ->and($results[0]->result)->toContain('"metric":"members"')
-        ->and($results[1]->result)->toContain('"metric":"new_members"');
+        $results = delivered($gateway);
+
+        expect($results->pluck('id')->all())->toBe(['call-members', 'call-signups'])
+            ->and($results[0]->result)->toContain('"metric":"members"')
+            ->and($results[1]->result)->toContain('"metric":"new_members"');
+    } finally {
+        $stats->releaseToolCallBudget();
+    }
 });
 
 it('keeps the two-call cap when parallel children share the tool', function (): void {
     $stats = new CommunityStats;
     $again = new Request(['metric' => 'members']);
 
-    expect($stats->handle($again))->not->toContain('budget exhausted');
+    try {
+        expect($stats->handle($again))->not->toContain('budget exhausted');
 
-    [, $gateway] = promptTom([$stats], [
-        TomParallelScript::calls([
-            ['call-signups', 'CommunityStats', ['metric' => 'new_members', 'days' => 7]],
-            ['call-authors', 'CommunityStats', ['metric' => 'public_authors', 'days' => 30]],
-        ]),
-        TomParallelScript::text('Counted.'),
-    ]);
+        [, $gateway] = promptTom([$stats], [
+            TomParallelScript::calls([
+                ['call-signups', 'CommunityStats', ['metric' => 'new_members', 'days' => 7]],
+                ['call-authors', 'CommunityStats', ['metric' => 'public_authors', 'days' => 30]],
+            ]),
+            TomParallelScript::text('Counted.'),
+        ]);
 
-    $bodies = delivered($gateway)->pluck('result');
+        $bodies = delivered($gateway)->pluck('result');
 
-    expect(delivered($gateway)->pluck('id')->all())->toBe(['call-signups', 'call-authors'])
-        ->and($bodies->filter(fn (string $result): bool => str_contains($result, 'budget exhausted')))->toHaveCount(1)
-        ->and($bodies->reject(fn (string $result): bool => str_contains($result, 'budget exhausted')))->toHaveCount(1)
-        ->and($stats->handle($again))->toContain('budget exhausted');
+        expect(delivered($gateway)->pluck('id')->all())->toBe(['call-signups', 'call-authors'])
+            ->and($bodies->filter(fn (string $result): bool => str_contains($result, 'budget exhausted')))->toHaveCount(1)
+            ->and($bodies->reject(fn (string $result): bool => str_contains($result, 'budget exhausted')))->toHaveCount(1)
+            ->and($stats->handle($again))->toContain('budget exhausted');
+    } finally {
+        $stats->releaseToolCallBudget();
+    }
 });
 
 /**

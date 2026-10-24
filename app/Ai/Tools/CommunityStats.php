@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Ai\Tools;
 
+use App\Ai\Tools\Concerns\HasToolCallBudget;
+use App\Ai\Tools\Concerns\ReleasesToolCallBudget;
 use App\Queries\CommunityStatsQuery;
 use Illuminate\Contracts\JsonSchema\JsonSchema;
 use Illuminate\JsonSchema\Types\Type;
@@ -13,8 +15,10 @@ use Laravel\Ai\Contracts\Tool;
 use Laravel\Ai\Tools\Request;
 
 #[Concurrent]
-final readonly class CommunityStats implements Tool
+final readonly class CommunityStats implements ReleasesToolCallBudget, Tool
 {
+    use HasToolCallBudget;
+
     private const array Metrics = ['members', 'new_members', 'public_authors', 'location', 'bio_language'];
 
     private ToolCallBudget $budget;
