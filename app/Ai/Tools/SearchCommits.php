@@ -9,12 +9,19 @@ use App\Models\User;
 use App\Queries\CommitSearchQuery;
 use Illuminate\Contracts\JsonSchema\JsonSchema;
 use Illuminate\JsonSchema\Types\Type;
+use JordanPartridge\ParallelTools\Attributes\Concurrent;
 use Laravel\Ai\Contracts\Tool;
 use Laravel\Ai\Tools\Request;
 
-final class SearchCommits implements Tool
+#[Concurrent]
+final readonly class SearchCommits implements Tool
 {
-    private int $calls = 0;
+    private ToolCallBudget $budget;
+
+    public function __construct()
+    {
+        $this->budget = new ToolCallBudget;
+    }
 
     public function description(): string
     {
@@ -23,7 +30,7 @@ final class SearchCommits implements Tool
 
     public function handle(Request $request): string
     {
-        if (++$this->calls > 2) {
+        if ($this->budget->exceeded()) {
             return 'Search budget exhausted. Answer using the evidence already retrieved.';
         }
 

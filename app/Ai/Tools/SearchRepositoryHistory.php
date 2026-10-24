@@ -7,12 +7,19 @@ namespace App\Ai\Tools;
 use App\Queries\RepositoryHistoryQuery;
 use Illuminate\Contracts\JsonSchema\JsonSchema;
 use Illuminate\JsonSchema\Types\Type;
+use JordanPartridge\ParallelTools\Attributes\Concurrent;
 use Laravel\Ai\Contracts\Tool;
 use Laravel\Ai\Tools\Request;
 
-final class SearchRepositoryHistory implements Tool
+#[Concurrent]
+final readonly class SearchRepositoryHistory implements Tool
 {
-    private int $calls = 0;
+    private ToolCallBudget $budget;
+
+    public function __construct()
+    {
+        $this->budget = new ToolCallBudget;
+    }
 
     public function description(): string
     {
@@ -21,7 +28,7 @@ final class SearchRepositoryHistory implements Tool
 
     public function handle(Request $request): string
     {
-        if (++$this->calls > 2) {
+        if ($this->budget->exceeded()) {
             return 'Repository history search budget exhausted. Answer using the evidence already retrieved.';
         }
 
