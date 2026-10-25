@@ -17,6 +17,7 @@ use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
+use Illuminate\Support\Sleep;
 use Laravel\Ai\Embeddings;
 
 it('removes the tool budget when a reply finishes', function (bool $toolThrows): void {
@@ -91,4 +92,27 @@ it('removes the tool budget when a reply finishes', function (bool $toolThrows):
 
 it('skips tools that do not carry a budget', function (): void {
     expect(fn () => ToolCallBudget::releaseAll([new stdClass]))->not->toThrow(Throwable::class);
+});
+
+it('fails closed when the budget lock stays held past the wait window', function (): void {
+    // The suite freezes time and fakes Sleep, so advance the clock on each faked
+    // sleep; that lets the lock's bounded wait expire deterministically instead
+    // of spinning forever.
+    Sleep::fake(syncWithCarbon: true);
+
+    $budget = new ToolCallBudget;
+
+    $key = (new ReflectionProperty($budget, 'key'))->getValue($budget);
+
+    $lock = Cache::store('file')->lock($key, 30);
+
+    expect($lock->acquire())->toBeTrue();
+
+    try {
+        // The counter is never incremented while the lock is held elsewhere, so
+        // the cap must still be enforced instead of letting the call slip past.
+        expect($budget->exceeded())->toBeTrue();
+    } finally {
+        $lock->forceRelease();
+    }
 });

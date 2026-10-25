@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Ai\Tools;
 
 use App\Ai\Tools\Concerns\ReleasesToolCallBudget;
+use Illuminate\Contracts\Cache\LockTimeoutException;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Str;
 
@@ -52,12 +53,19 @@ final readonly class ToolCallBudget
     {
         $cache = Cache::repository(Cache::store(self::Store)->getStore(), ['store' => self::Store]);
 
-        $count = $cache->withoutOverlapping($this->key, function () use ($cache): int {
-            $count = $cache->integer($this->key, 0) + 1;
-            $cache->put($this->key, $count, self::TtlSeconds);
+        try {
+            $count = $cache->withoutOverlapping($this->key, function () use ($cache): int {
+                $count = $cache->integer($this->key, 0) + 1;
+                $cache->put($this->key, $count, self::TtlSeconds);
 
-            return $count;
-        }, self::LockSeconds, self::LockSeconds);
+                return $count;
+            }, self::LockSeconds, self::LockSeconds);
+        } catch (LockTimeoutException) {
+            // The budget lock stayed held past the wait window, so the counter was
+            // never incremented. Fail closed and treat the call as over budget
+            // rather than letting an uncounted call slip past the cap.
+            return true;
+        }
 
         return $count > self::Limit;
     }
