@@ -1,6 +1,7 @@
 {
     "minimum-release-age": 1,
     "minimum-release-age-exclude": [
+        "jordanpartridge/laravel-ai-parallel-tools",
         "laravel/vet",
         "roave/security-advisories"
     ]

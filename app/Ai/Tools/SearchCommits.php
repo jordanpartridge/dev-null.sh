@@ -4,17 +4,28 @@ declare(strict_types=1);
 
 namespace App\Ai\Tools;
 
+use App\Ai\Tools\Concerns\HasToolCallBudget;
+use App\Ai\Tools\Concerns\ReleasesToolCallBudget;
 use App\Models\Commit;
 use App\Models\User;
 use App\Queries\CommitSearchQuery;
 use Illuminate\Contracts\JsonSchema\JsonSchema;
 use Illuminate\JsonSchema\Types\Type;
+use JordanPartridge\ParallelTools\Attributes\Concurrent;
 use Laravel\Ai\Contracts\Tool;
 use Laravel\Ai\Tools\Request;
 
-final class SearchCommits implements Tool
+#[Concurrent]
+final readonly class SearchCommits implements ReleasesToolCallBudget, Tool
 {
-    private int $calls = 0;
+    use HasToolCallBudget;
+
+    private ToolCallBudget $budget;
+
+    public function __construct()
+    {
+        $this->budget = new ToolCallBudget;
+    }
 
     public function description(): string
     {
@@ -23,7 +34,7 @@ final class SearchCommits implements Tool
 
     public function handle(Request $request): string
     {
-        if (++$this->calls > 2) {
+        if ($this->budget->exceeded()) {
             return 'Search budget exhausted. Answer using the evidence already retrieved.';
         }
 
